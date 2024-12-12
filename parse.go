@@ -246,7 +246,8 @@ func parseStmt(rstmt *pgquery.RawStmt) (action Action, err error) {
 		return nil, stmtErrorf(rstmt, "%w", err)
 	}
 
-	// @TODO walk the stmt node tree to find AExpr nodes where the "name" == "@" and "rexpr" is not nil.
+	// @TODO walk the stmt node tree to find AExpr nodes where the "name" == "@" and "rexpr" is not nil. Take care of
+	// differencees in the AST tree when using "CAST .. AS text" and "::text"
 
 	if err := checkAction(action); err != nil {
 		return nil, stmtErrorf(rstmt, "%w", err)

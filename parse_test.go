@@ -2,6 +2,9 @@ package pgproto_test
 
 import (
 	"embed"
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -9,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:embed testdata/*.sql
+//go:embed testdata/*
 var testdata embed.FS
 
 func TestParse(t *testing.T) {
@@ -20,6 +23,7 @@ func TestParse(t *testing.T) {
 		{filename: "simple_update.sql"},
 		{filename: "double_cast_select.sql"},
 		{filename: "multi_cast_insert.sql"},
+		{filename: "constructor_cast_select.sql"},
 	} {
 		t.Run(tt.filename, func(t *testing.T) {
 			data, err := testdata.ReadFile(filepath.Join("testdata", tt.filename))
@@ -28,6 +32,21 @@ func TestParse(t *testing.T) {
 			actions, err := pgproto.ParseFullTyped(data)
 			require.NoError(t, err)
 			require.Len(t, actions, 1)
+
+			actJSON, err := json.MarshalIndent(actions, "", "  ")
+			require.NoError(t, err)
+
+			expData, err := testdata.ReadFile(filepath.Join("testdata", tt.filename+".json"))
+			if os.IsNotExist(err) && os.Getenv("PGPROTO_REFRESH_SNAPSHOT") != "" {
+				fmt.Fprintf(os.Stderr, "refreshed snapshot for: %s", tt.filename)
+
+				os.WriteFile(filepath.Join("testdata", tt.filename+".json"), actJSON, 0o777)
+				expData = actJSON
+			} else if err != nil {
+				require.Fail(t, err.Error())
+			}
+
+			require.JSONEq(t, string(expData), string(actJSON))
 		})
 	}
 }

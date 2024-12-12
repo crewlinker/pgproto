@@ -1,0 +1,14 @@
+[
+  {
+    "Outputs": [
+      {
+        "Number": 1,
+        "Name": "val_1",
+        "Type": {
+          "Schema": null,
+          "Name": "text"
+        }
+      }
+    ]
+  }
+]

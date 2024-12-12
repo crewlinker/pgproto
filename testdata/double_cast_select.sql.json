@@ -1,0 +1,22 @@
+[
+  {
+    "Outputs": [
+      {
+        "Number": 1,
+        "Name": "id_1",
+        "Type": {
+          "Schema": null,
+          "Name": "uuid"
+        }
+      },
+      {
+        "Number": 100,
+        "Name": "salary_text_100",
+        "Type": {
+          "Schema": null,
+          "Name": "text"
+        }
+      }
+    ]
+  }
+]

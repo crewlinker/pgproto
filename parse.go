@@ -87,6 +87,11 @@ func parseResultTarget(stmt interface{ GetResTarget() *pgquery.ResTarget }) (out
 		panicf(nil, "no result target")
 	}
 
+	// @TODO better errors by menting the column name. as in for SELECT id FROM foo; it should mention 'id'
+	// in the error. For furthe errors. BUT this requires de-nesting the casting stack, check for a troublesome
+	// example in the "double_result_cast.sql" example. If we have that, we should replace column '%s' shown
+	// below to mention the column name, not the alias.
+
 	out = &Output{}
 	out.Name = rtgt.GetName()
 	if out.Name == "" {
@@ -105,7 +110,7 @@ func parseResultTarget(stmt interface{ GetResTarget() *pgquery.ResTarget }) (out
 
 	cast := val.GetTypeCast()
 	if cast == nil {
-		return nil, resTargetErrorf(rtgt, "column '%s': %w", out.Name, ErrColumnWithoutCast)
+		return nil, resTargetErrorf(rtgt, "alias '%s': %w", out.Name, ErrColumnWithoutCast)
 	}
 
 	typeName := cast.GetTypeName()
@@ -122,7 +127,8 @@ func parseResultTarget(stmt interface{ GetResTarget() *pgquery.ResTarget }) (out
 		out.Type.Schema = &schemaStr
 		out.Type.Name = svalString(typeNameParts[1])
 	default:
-		return nil, resTargetErrorf(rtgt, "%w, number of parts: %d", ErrTypeCastInvalid, len(typeNameParts))
+		return nil, resTargetErrorf(rtgt, "alias '%s': %w, number of parts: %d",
+			out.Name, ErrTypeCastInvalid, len(typeNameParts))
 	}
 
 	for _, part := range typeName.GetNames() {

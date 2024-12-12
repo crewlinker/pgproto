@@ -5,16 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	pgquery "github.com/pganalyze/pg_query_go/v6"
 	"github.com/samber/lo"
 )
 
 // Output describe the output from an action.
-type Output struct{}
+type Output struct {
+	Number int
+	Name   string
+}
 
 // Action describes an action we support.
-type Action interface{ isAction() }
+type Action interface {
+	isAction()
+	getOutputs() []*Output
+}
 
 type (
 	// SelectAction describes an action that selects data.
@@ -38,26 +46,44 @@ type (
 	}
 )
 
-func (SelectAction) isAction() {}
-func (UpdateAction) isAction() {}
-func (InsertAction) isAction() {}
-func (DeleteAction) isAction() {}
+func (SelectAction) isAction()               {}
+func (UpdateAction) isAction()               {}
+func (InsertAction) isAction()               {}
+func (DeleteAction) isAction()               {}
+func (a SelectAction) getOutputs() []*Output { return a.Outputs }
+func (a UpdateAction) getOutputs() []*Output { return a.Outputs }
+func (a InsertAction) getOutputs() []*Output { return a.Outputs }
+func (a DeleteAction) getOutputs() []*Output { return a.Outputs }
 
-func parseResultTarget(*pgquery.ResTarget) (*Output, error) {
-	return &Output{}, nil
+// ErrNoColumnAliasUsed is returned when parsing a result target but it has no explicitly named with an alias.
+var ErrNoColumnAliasUsed = errors.New(`no alias for column in result set, not using "AS"`)
+
+func parseResultTarget(stmt interface{ GetResTarget() *pgquery.ResTarget }) (out *Output, err error) {
+	rtgt := stmt.GetResTarget()
+	if rtgt == nil {
+		panicf(nil, "no result target")
+	}
+
+	out = &Output{}
+	out.Name = rtgt.GetName()
+	if out.Name == "" {
+		return nil, resTargetErrorf(rtgt, "%w", ErrNoColumnAliasUsed)
+	}
+
+	out.Number, err = numberedName(out.Name)
+	if err != nil {
+		return nil, resTargetErrorf(rtgt, "%w", err)
+	}
+
+	return
 }
 
 func parseSelectStmt(stmt *pgquery.SelectStmt) (action *SelectAction, err error) {
 	action = &SelectAction{}
 	for _, target := range stmt.GetTargetList() {
-		rest := target.GetResTarget()
-		if rest == nil {
-			panicf(target, "no result target")
-		}
-
-		output, perr := parseResultTarget(rest)
+		output, perr := parseResultTarget(target)
 		if perr != nil {
-			err = errors.Join(err, resTargetErrorf(rest, "failed to parse: %w", err))
+			err = errors.Join(err, perr)
 
 			continue
 		}
@@ -65,20 +91,15 @@ func parseSelectStmt(stmt *pgquery.SelectStmt) (action *SelectAction, err error)
 		action.Outputs = append(action.Outputs, output)
 	}
 
-	return action, nil
+	return
 }
 
 func parseInsertStmt(stmt *pgquery.InsertStmt) (action *InsertAction, err error) {
 	action = &InsertAction{}
 	for _, returning := range stmt.GetReturningList() {
-		rest := returning.GetResTarget()
-		if rest == nil {
-			panicf(returning, "no result target")
-		}
-
-		output, perr := parseResultTarget(rest)
+		output, perr := parseResultTarget(returning)
 		if perr != nil {
-			err = errors.Join(err, resTargetErrorf(rest, "failed to parse: %w", err))
+			err = errors.Join(err, perr)
 
 			continue
 		}
@@ -86,20 +107,31 @@ func parseInsertStmt(stmt *pgquery.InsertStmt) (action *InsertAction, err error)
 		action.Outputs = append(action.Outputs, output)
 	}
 
-	return action, nil
+	return
 }
 
 func parseDeleteStmt(stmt *pgquery.DeleteStmt) (action *DeleteAction, err error) {
 	action = &DeleteAction{}
 	for _, returning := range stmt.GetReturningList() {
-		rest := returning.GetResTarget()
-		if rest == nil {
-			panicf(returning, "no result target")
+		output, perr := parseResultTarget(returning)
+		if perr != nil {
+			err = errors.Join(err, perr)
+
+			continue
 		}
 
-		output, perr := parseResultTarget(rest)
+		action.Outputs = append(action.Outputs, output)
+	}
+
+	return
+}
+
+func parseUpdateStmt(stmt *pgquery.UpdateStmt) (action *UpdateAction, err error) {
+	action = &UpdateAction{}
+	for _, returning := range stmt.GetReturningList() {
+		output, perr := parseResultTarget(returning)
 		if perr != nil {
-			err = errors.Join(err, resTargetErrorf(rest, "failed to parse: %w", err))
+			err = errors.Join(err, perr)
 
 			continue
 		}
@@ -110,25 +142,20 @@ func parseDeleteStmt(stmt *pgquery.DeleteStmt) (action *DeleteAction, err error)
 	return action, nil
 }
 
-func parseUpdateStmt(stmt *pgquery.UpdateStmt) (action *UpdateAction, err error) {
-	action = &UpdateAction{}
-	for _, returning := range stmt.GetReturningList() {
-		rest := returning.GetResTarget()
-		if rest == nil {
-			panicf(returning, "no result target")
+// ErrDuplicateNumberSuffix is returned when a number suffix for a name is used twice.
+var ErrDuplicateNumberSuffix = errors.New("duplicate number suffix")
+
+func checkAction(action Action) error {
+	outputsByNumber := map[int]*Output{}
+	for _, output := range action.getOutputs() {
+		if existing, exists := outputsByNumber[output.Number]; exists {
+			return fmt.Errorf("%w, %d is already used by: %s", ErrDuplicateNumberSuffix, output.Number, existing.Name)
 		}
 
-		output, perr := parseResultTarget(rest)
-		if perr != nil {
-			err = errors.Join(err, resTargetErrorf(rest, "failed to parse: %w", err))
-
-			continue
-		}
-
-		action.Outputs = append(action.Outputs, output)
+		outputsByNumber[output.Number] = output
 	}
 
-	return action, nil
+	return nil
 }
 
 func parseStmt(rstmt *pgquery.RawStmt) (action Action, err error) {
@@ -153,8 +180,14 @@ func parseStmt(rstmt *pgquery.RawStmt) (action Action, err error) {
 	}
 
 	if err != nil {
-		return nil, stmtErrorf(rstmt, "failed to parse: %w", err)
+		return nil, stmtErrorf(rstmt, "%w", err)
 	}
+
+	if err := checkAction(action); err != nil {
+		return nil, stmtErrorf(rstmt, "%w", err)
+	}
+
+	// @TODO check that each output number is unique per statement.
 
 	return action, nil
 }
@@ -197,4 +230,31 @@ func panicf(node *pgquery.Node, format string, args ...any) {
 
 func sdump(v any) string {
 	return string(lo.Must(json.MarshalIndent(v, "", "  ")))
+}
+
+// ErrNamedWithoutNumberSuffix is returned when a column name (alias) does not have a numbered suffix.
+var ErrNamedWithoutNumberSuffix = errors.New("not named with a number suffix, add _<N> at the end")
+
+// ErrInvalidNumberSuffix is returned when the name has a number suffix, but its invalid.
+var ErrInvalidNumberSuffix = errors.New("invalid number suffix for name, must be > 0")
+
+// numberedName extracts the number at the end of a string separated by an underscores.
+func numberedName(name string) (int, error) {
+	lastUnderscore := strings.LastIndex(name, "_")
+	if lastUnderscore == -1 || lastUnderscore == len(name)-1 {
+		return 0, ErrNamedWithoutNumberSuffix
+	}
+
+	numStr := name[lastUnderscore+1:]
+
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, ErrNamedWithoutNumberSuffix
+	}
+
+	if num < 1 {
+		return 0, ErrInvalidNumberSuffix
+	}
+
+	return num, nil
 }

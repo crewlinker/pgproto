@@ -49,6 +49,7 @@ linters:
     - dupword # gets in the way often when we're commenting out stuff
     - containedctx # actually common for actors/workers that have a context for the lifetime
     - paralleltest # too anoying
+    - mnd # too annoying
 
 issues:
   include:

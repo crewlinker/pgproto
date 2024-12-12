@@ -45,6 +45,12 @@ func TestNotUsingAlias(t *testing.T) {
 	require.ErrorIs(t, err, pgproto.ErrNoColumnAliasUsed)
 }
 
+func TestNotUsingTypeCast(t *testing.T) {
+	_, err := pgproto.ParseFullTyped([]byte(`SELECT id as id_1 from foo`))
+	require.ErrorContains(t, err, "no type cast")
+	require.ErrorIs(t, err, pgproto.ErrColumnWithoutCast)
+}
+
 func TestNamedWithoutNumberSuffix(t *testing.T) {
 	_, err := pgproto.ParseFullTyped([]byte(`SELECT id AS id1 from foo`))
 	require.ErrorContains(t, err, "not named with a number suffix")
@@ -64,7 +70,7 @@ func TestNotNamedIfSuffixNotInt(t *testing.T) {
 }
 
 func TestDuplicateNumberSuffix(t *testing.T) {
-	_, err := pgproto.ParseFullTyped([]byte(`SELECT id AS id_1, name AS name_1 from foo`))
+	_, err := pgproto.ParseFullTyped([]byte(`SELECT id::text AS id_1, name::uuid AS name_1 from foo`))
 	require.ErrorContains(t, err, "duplicate number suffix")
 	require.ErrorIs(t, err, pgproto.ErrDuplicateNumberSuffix)
 }

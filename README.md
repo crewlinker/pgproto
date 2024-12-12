@@ -14,3 +14,4 @@
 - Support MERGE and UPSERT
 - Use protobuf for the parsing result
 - Test and support stuff like this: https://www.postgresql.org/docs/current/queries-union.html
+- Can we fuzz the parsing?

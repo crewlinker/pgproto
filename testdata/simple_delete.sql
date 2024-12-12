@@ -1,5 +1,5 @@
 DELETE FROM foo
 WHERE id = @id::text
 RETURNING
-    id AS id_1;
+    id::uuid AS id_1;
 

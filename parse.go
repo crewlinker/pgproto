@@ -16,6 +16,13 @@ import (
 type Output struct {
 	Number int
 	Name   string
+	Type   TypeRef
+}
+
+// TypeRef references a type.
+type TypeRef struct {
+	Schema *string
+	Name   string
 }
 
 // Action describes an action we support.
@@ -56,7 +63,23 @@ func (a InsertAction) getOutputs() []*Output { return a.Outputs }
 func (a DeleteAction) getOutputs() []*Output { return a.Outputs }
 
 // ErrNoColumnAliasUsed is returned when parsing a result target but it has no explicitly named with an alias.
-var ErrNoColumnAliasUsed = errors.New(`no alias for column in result set, not using "AS"`)
+var ErrNoColumnAliasUsed = errors.New(`no alias for column in result set, use "AS" to define the alias`)
+
+// ErrColumnWithoutCast is returned when parsing a result target but the colun is not type casted.
+var ErrColumnWithoutCast = errors.New(`no type cast for column in result set, use "::" to declare the type`)
+
+// ErrTypeCastInvalid is returned when the type cast is invalid.
+var ErrTypeCastInvalid = errors.New(`invalid type cast for column, must be "::<name>" or "::<schema>.<name>" `)
+
+// svalString returns a string.
+func svalString(n interface{ GetString_() *pgquery.String }) string {
+	str := n.GetString_()
+	if str == nil {
+		panicf(nil, "no string value in string")
+	}
+
+	return str.GetSval()
+}
 
 func parseResultTarget(stmt interface{ GetResTarget() *pgquery.ResTarget }) (out *Output, err error) {
 	rtgt := stmt.GetResTarget()
@@ -75,7 +98,41 @@ func parseResultTarget(stmt interface{ GetResTarget() *pgquery.ResTarget }) (out
 		return nil, resTargetErrorf(rtgt, "%w", err)
 	}
 
-	return
+	val := rtgt.GetVal()
+	if val == nil {
+		panicf(nil, "result target without value (val)")
+	}
+
+	cast := val.GetTypeCast()
+	if cast == nil {
+		return nil, resTargetErrorf(rtgt, "column '%s': %w", out.Name, ErrColumnWithoutCast)
+	}
+
+	typeName := cast.GetTypeName()
+	if typeName == nil {
+		panicf(val, "type cast without type name")
+	}
+
+	typeNameParts := typeName.GetNames()
+	switch len(typeNameParts) {
+	case 1: // not fully qualified, e.g:  SELECT '123'::int4;
+		out.Type.Name = svalString(typeNameParts[0])
+	case 2: // fully qualified, e.g:      SELECT '123'::pg_catalog.int4;
+		schemaStr := svalString(typeNameParts[0])
+		out.Type.Schema = &schemaStr
+		out.Type.Name = svalString(typeNameParts[1])
+	default:
+		return nil, resTargetErrorf(rtgt, "%w, number of parts: %d", ErrTypeCastInvalid, len(typeNameParts))
+	}
+
+	for _, part := range typeName.GetNames() {
+		partStr := part.GetString_()
+		if partStr == nil {
+			panicf(part, "type cast name part is not a string")
+		}
+	}
+
+	return out, nil
 }
 
 func parseSelectStmt(stmt *pgquery.SelectStmt) (action *SelectAction, err error) {
@@ -186,8 +243,6 @@ func parseStmt(rstmt *pgquery.RawStmt) (action Action, err error) {
 	if err := checkAction(action); err != nil {
 		return nil, stmtErrorf(rstmt, "%w", err)
 	}
-
-	// @TODO check that each output number is unique per statement.
 
 	return action, nil
 }

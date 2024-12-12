@@ -18,7 +18,8 @@ func TestParse(t *testing.T) {
 		{filename: "simple_insert.sql"},
 		{filename: "simple_delete.sql"},
 		{filename: "simple_update.sql"},
-		{filename: "double_result_cast.sql"},
+		{filename: "double_cast_select.sql"},
+		{filename: "multi_cast_insert.sql"},
 	} {
 		t.Run(tt.filename, func(t *testing.T) {
 			data, err := testdata.ReadFile(filepath.Join("testdata", tt.filename))
